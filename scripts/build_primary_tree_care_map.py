@@ -22,12 +22,10 @@ MAP_FIELDS = [
     "weekend_availability",
     "next_available_visit_days",
     "care_accessibility_score",
-    "clinic_address",
     "clinic_neighborhood",
+    "clinic_city",
     "clinic_latitude",
     "clinic_longitude",
-    "signature_prescription",
-    "waiting_room_feature",
 ]
 
 
@@ -37,41 +35,131 @@ def clean_bool(value: object) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes"}
 
 
-def load_map_rows(input_csv: Path) -> list[dict[str, object]]:
+def top_species(values: pd.Series) -> str:
+    counts = values.fillna("Unknown").value_counts().head(3)
+    return ", ".join(f"{name} ({count})" for name, count in counts.items())
+
+
+def pair_counts(values: pd.Series) -> list[list[object]]:
+    counts = values.fillna("Unknown").value_counts()
+    return [[str(name), int(count)] for name, count in counts.items()]
+
+
+def load_map_groups(input_csv: Path) -> list[dict[str, object]]:
     df = pd.read_csv(input_csv, usecols=MAP_FIELDS)
     df = df.dropna(subset=["clinic_latitude", "clinic_longitude"]).copy()
 
+    text_fields = [
+        "species_common",
+        "medical_specialty",
+        "provider_type",
+        "clinic_neighborhood",
+        "clinic_city",
+    ]
+    for field in text_fields:
+        df[field] = df[field].fillna("Unknown").astype(str)
+
+    numeric_fields = [
+        "care_rating",
+        "next_available_visit_days",
+        "care_accessibility_score",
+        "clinic_latitude",
+        "clinic_longitude",
+    ]
+    for field in numeric_fields:
+        df[field] = pd.to_numeric(df[field], errors="coerce")
+
+    df["star_doctor"] = df["star_doctor"].map(clean_bool).astype(int)
+    df["weekend_availability"] = df["weekend_availability"].map(clean_bool).astype(int)
+
+    location_keys = ["clinic_neighborhood", "clinic_city"]
+
+    base = (
+        df.groupby(location_keys, dropna=False)
+        .agg(
+            tree_count=("provider_id", "size"),
+            latitude=("clinic_latitude", "mean"),
+            longitude=("clinic_longitude", "mean"),
+            avg_rating=("care_rating", "mean"),
+            avg_wait_days=("next_available_visit_days", "mean"),
+            avg_access=("care_accessibility_score", "mean"),
+            star_count=("star_doctor", "sum"),
+            weekend_count=("weekend_availability", "sum"),
+            top_species=("species_common", top_species),
+            specialties=("medical_specialty", pair_counts),
+            provider_types=("provider_type", pair_counts),
+        )
+        .reset_index()
+    )
+
+    segment_rows = (
+        df.groupby([*location_keys, "medical_specialty", "provider_type"], dropna=False)
+        .agg(
+            tree_count=("provider_id", "size"),
+            avg_rating=("care_rating", "mean"),
+            avg_wait_days=("next_available_visit_days", "mean"),
+            avg_access=("care_accessibility_score", "mean"),
+            star_count=("star_doctor", "sum"),
+            weekend_count=("weekend_availability", "sum"),
+        )
+        .reset_index()
+    )
+
+    segments_by_location: dict[tuple[str, str], list[list[object]]] = {}
+    for row in segment_rows.itertuples(index=False):
+        key = (str(row.clinic_neighborhood), str(row.clinic_city))
+        segments_by_location.setdefault(key, []).append(
+            [
+                str(row.medical_specialty),
+                str(row.provider_type),
+                int(row.tree_count),
+                round(float(row.avg_rating), 2),
+                round(float(row.avg_wait_days), 1),
+                round(float(row.avg_access), 1),
+                int(row.star_count),
+                int(row.weekend_count),
+            ]
+        )
+
     rows: list[dict[str, object]] = []
-    for row in df.itertuples(index=False):
-        item = row._asdict()
+    for row in base.itertuples(index=False):
+        neighborhood = str(row.clinic_neighborhood)
+        city = str(row.clinic_city)
+        search_parts = [
+            neighborhood,
+            city,
+            str(row.top_species),
+            " ".join(name for name, _count in row.specialties),
+            " ".join(name for name, _count in row.provider_types),
+        ]
         rows.append(
             {
-                "id": int(item["provider_id"]),
-                "species": str(item["species_common"]),
-                "specialty": str(item["medical_specialty"]),
-                "type": str(item["provider_type"]),
-                "rating": float(item["care_rating"]),
-                "star": int(item["star_doctor"]),
-                "weekend": clean_bool(item["weekend_availability"]),
-                "wait": int(item["next_available_visit_days"]),
-                "access": int(item["care_accessibility_score"]),
-                "address": str(item["clinic_address"]),
-                "neighborhood": str(item["clinic_neighborhood"]),
-                "lat": round(float(item["clinic_latitude"]), 6),
-                "lng": round(float(item["clinic_longitude"]), 6),
-                "prescription": str(item["signature_prescription"]),
-                "waiting": str(item["waiting_room_feature"]),
+                "neighborhood": neighborhood,
+                "city": city,
+                "count": int(row.tree_count),
+                "lat": round(float(row.latitude), 6),
+                "lng": round(float(row.longitude), 6),
+                "rating": round(float(row.avg_rating), 2),
+                "wait": round(float(row.avg_wait_days), 1),
+                "access": round(float(row.avg_access), 1),
+                "stars": int(row.star_count),
+                "weekends": int(row.weekend_count),
+                "topSpecies": str(row.top_species),
+                "specialties": row.specialties,
+                "types": row.provider_types,
+                "segments": segments_by_location.get((neighborhood, city), []),
+                "searchText": " ".join(search_parts).lower(),
             }
         )
     return rows
 
 
 def render_html(rows: list[dict[str, object]]) -> str:
-    specialties = sorted({str(row["specialty"]) for row in rows})
-    provider_types = sorted({str(row["type"]) for row in rows})
-    payload = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
-    specialties_json = json.dumps(specialties)
-    provider_types_json = json.dumps(provider_types)
+    specialties = sorted({segment[0] for row in rows for segment in row["segments"]})
+    provider_types = sorted({segment[1] for row in rows for segment in row["segments"]})
+    payload = json.dumps(rows, ensure_ascii=True, separators=(",", ":"))
+    specialties_json = json.dumps(specialties, ensure_ascii=True)
+    provider_types_json = json.dumps(provider_types, ensure_ascii=True)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -223,12 +311,12 @@ def render_html(rows: list[dict[str, object]]) -> str:
   <div id="app">
     <aside>
       <h1>Primary Tree Care Map</h1>
-      <div class="subtitle">Clustered local map of NYC trees reimagined as public primary-care providers. Zoom in or filter to see individual trees.</div>
+      <div class="subtitle">Neighborhood-level map of NYC trees reimagined as public primary-care providers. Filters update each neighborhood total without drawing one marker per tree.</div>
 
       <div class="metric-grid">
-        <div class="metric"><strong id="matchCount">0</strong><span>matching trees</span></div>
-        <div class="metric"><strong id="drawnCount">0</strong><span>drawn map items</span></div>
-        <div class="metric"><strong id="avgRating">0.0</strong><span>avg care rating</span></div>
+        <div class="metric"><strong id="treeCount">0</strong><span>matching trees</span></div>
+        <div class="metric"><strong id="groupCount">0</strong><span>neighborhoods</span></div>
+        <div class="metric"><strong id="avgRating">0.0</strong><span>weighted avg rating</span></div>
         <div class="metric"><strong id="starCount">0</strong><span>star doctors</span></div>
       </div>
 
@@ -238,21 +326,21 @@ def render_html(rows: list[dict[str, object]]) -> str:
       <label for="providerType">Provider Type</label>
       <select id="providerType"></select>
 
-      <label for="search">Search Species, Neighborhood, ID</label>
-      <input id="search" type="search" placeholder="ginkgo, Ridgewood, 208201" />
+      <label for="search">Search Neighborhood, City, Species</label>
+      <input id="search" type="search" placeholder="Ridgewood, ginkgo, pediatrics" />
 
-      <label for="rating">Minimum Care Rating: <span id="ratingValue">1.5</span></label>
+      <label for="rating">Minimum Average Rating: <span id="ratingValue">1.5</span></label>
       <input id="rating" type="range" min="1.5" max="5" step="0.1" value="1.5" />
 
       <div class="checks">
-        <label><input id="starOnly" type="checkbox" /> Star doctors only</label>
-        <label><input id="weekendOnly" type="checkbox" /> Weekend availability only</label>
+        <label><input id="starOnly" type="checkbox" /> Groups with star doctors</label>
+        <label><input id="weekendOnly" type="checkbox" /> Weekend availability</label>
       </div>
 
       <button id="reset">Reset Filters</button>
 
       <div class="legend">
-        Large result sets are clustered for browser stability. Individual tree markers appear when you zoom in or narrow the filters.
+        Circles are neighborhoods. Larger circles mean more matching tree providers.
       </div>
     </aside>
     <main id="map"></main>
@@ -260,10 +348,9 @@ def render_html(rows: list[dict[str, object]]) -> str:
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const rows = {payload};
+    const groups = {payload};
     const specialties = {specialties_json};
     const providerTypes = {provider_types_json};
-    const maxIndividualMarkers = 1200;
     const specialtyColors = {{
       "Allergy/Immunology": "#d97706",
       "Cardiology": "#dc2626",
@@ -282,16 +369,35 @@ def render_html(rows: list[dict[str, object]]) -> str:
       "Women's Health": "#e11d48"
     }};
 
+    const controls = {{
+      specialty: document.getElementById("specialty"),
+      providerType: document.getElementById("providerType"),
+      search: document.getElementById("search"),
+      rating: document.getElementById("rating"),
+      starOnly: document.getElementById("starOnly"),
+      weekendOnly: document.getElementById("weekendOnly")
+    }};
+
     const map = L.map("map", {{ preferCanvas: true }}).setView([40.72, -73.94], 11);
+    const canvasRenderer = L.canvas({{ padding: 0.5 }});
     L.tileLayer("https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png", {{
       maxZoom: 19,
       attribution: "&copy; OpenStreetMap contributors"
     }}).addTo(map);
 
-    const itemLayer = L.layerGroup().addTo(map);
+    const layer = L.layerGroup().addTo(map);
+
+    function escapeHtml(value) {{
+      return String(value).replace(/[&<>"']/g, character => ({{
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }}[character]));
+    }}
 
     function optionList(select, values, label) {{
-      select.innerHTML = "";
       const all = document.createElement("option");
       all.value = "";
       all.textContent = "All " + label;
@@ -304,183 +410,155 @@ def render_html(rows: list[dict[str, object]]) -> str:
       }});
     }}
 
-    optionList(document.getElementById("specialty"), specialties, "specialties");
-    optionList(document.getElementById("providerType"), providerTypes, "provider types");
+    optionList(controls.specialty, specialties, "specialties");
+    optionList(controls.providerType, providerTypes, "provider types");
 
-    function markerRadius(row) {{
-      const base = 4 + Math.max(0, row.rating - 3) * 1.4;
-      return row.star ? base + 3 : base;
+    function sortPairs(map) {{
+      return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
     }}
 
-    function treePopup(row) {{
-      return '<div class="popup">' +
-        '<h2>' + row.species + ' #' + row.id + '</h2>' +
-        '<p><strong>' + row.specialty + '</strong> · ' + row.type + '</p>' +
-        '<p><strong>Rating:</strong> ' + row.rating.toFixed(1) + ' · <strong>Access:</strong> ' + row.access + ' · <strong>Wait:</strong> ' + row.wait + ' days</p>' +
-        '<p><strong>Weekend:</strong> ' + (row.weekend ? 'Yes' : 'Taking a break') + '</p>' +
-        '<p><strong>Location:</strong> ' + row.address + ', ' + row.neighborhood + '</p>' +
-        '<p><strong>Prescription:</strong> ' + row.prescription + '</p>' +
-        '<p><strong>Waiting room:</strong> ' + row.waiting + '</p>' +
-      '</div>';
+    function pairSummary(pairs, limit) {{
+      return pairs.slice(0, limit).map(pair => escapeHtml(pair[0]) + " (" + pair[1].toLocaleString() + ")").join(", ");
     }}
 
-    function clusterPopup(cluster) {{
-      return '<div class="popup">' +
-        '<h2>' + cluster.count.toLocaleString() + ' care trees</h2>' +
-        '<p><strong>Dominant specialty:</strong> ' + cluster.specialty + '</p>' +
-        '<p><strong>Avg rating:</strong> ' + cluster.avgRating.toFixed(1) + '</p>' +
-        '<p><strong>Star doctors:</strong> ' + cluster.stars.toLocaleString() + '</p>' +
-        '<p>Zoom in to inspect individual tree providers.</p>' +
-      '</div>';
-    }}
+    function filteredStats(group) {{
+      const specialty = controls.specialty.value;
+      const type = controls.providerType.value;
+      if (!specialty && !type) {{
+        return {{
+          count: group.count,
+          rating: group.rating,
+          wait: group.wait,
+          access: group.access,
+          stars: group.stars,
+          weekends: group.weekends,
+          specialties: group.specialties,
+          types: group.types
+        }};
+      }}
 
-    function makeTreeMarker(row) {{
-      const marker = L.circleMarker([row.lat, row.lng], {{
-        renderer: L.canvas(),
-        radius: markerRadius(row),
-        color: row.star ? "#111827" : specialtyColors[row.specialty] || "#334155",
-        weight: row.star ? 2.5 : 1,
-        fillColor: specialtyColors[row.specialty] || "#334155",
-        fillOpacity: row.star ? 0.92 : 0.68
+      let count = 0;
+      let ratingTotal = 0;
+      let waitTotal = 0;
+      let accessTotal = 0;
+      let stars = 0;
+      let weekends = 0;
+      const specialtyMap = new Map();
+      const typeMap = new Map();
+
+      group.segments.forEach(segment => {{
+        const segmentSpecialty = segment[0];
+        const segmentType = segment[1];
+        const segmentCount = segment[2];
+        if (specialty && segmentSpecialty !== specialty) return;
+        if (type && segmentType !== type) return;
+
+        count += segmentCount;
+        ratingTotal += segment[3] * segmentCount;
+        waitTotal += segment[4] * segmentCount;
+        accessTotal += segment[5] * segmentCount;
+        stars += segment[6];
+        weekends += segment[7];
+        specialtyMap.set(segmentSpecialty, (specialtyMap.get(segmentSpecialty) || 0) + segmentCount);
+        typeMap.set(segmentType, (typeMap.get(segmentType) || 0) + segmentCount);
       }});
-      marker.bindPopup(treePopup(row), {{ maxWidth: 360 }});
-      return marker;
+
+      return {{
+        count,
+        rating: count ? ratingTotal / count : 0,
+        wait: count ? waitTotal / count : 0,
+        access: count ? accessTotal / count : 0,
+        stars,
+        weekends,
+        specialties: sortPairs(specialtyMap),
+        types: sortPairs(typeMap)
+      }};
     }}
 
-    function makeClusterMarker(cluster) {{
-      const radius = Math.min(28, 7 + Math.sqrt(cluster.count) * 1.7);
-      const marker = L.circleMarker([cluster.lat, cluster.lng], {{
-        renderer: L.canvas(),
-        radius,
-        color: "#18392b",
-        weight: 1.5,
-        fillColor: specialtyColors[cluster.specialty] || "#2f7d4f",
+    function currentPairs() {{
+      const query = controls.search.value.trim().toLowerCase();
+      const minRating = Number(controls.rating.value);
+      const starOnly = controls.starOnly.checked;
+      const weekendOnly = controls.weekendOnly.checked;
+
+      return groups
+        .map(group => ({{ group, stats: filteredStats(group) }}))
+        .filter(pair => {{
+          if (!pair.stats.count) return false;
+          if (pair.stats.rating < minRating) return false;
+          if (starOnly && pair.stats.stars < 1) return false;
+          if (weekendOnly && pair.stats.weekends < 1) return false;
+          if (query && !pair.group.searchText.includes(query)) return false;
+          return true;
+        }});
+    }}
+
+    function radius(stats) {{
+      return Math.min(32, 6 + Math.sqrt(stats.count) * 0.65);
+    }}
+
+    function popup(pair) {{
+      const group = pair.group;
+      const stats = pair.stats;
+      const weekendShare = stats.count ? Math.round(stats.weekends / stats.count * 100) : 0;
+      return '<div class="popup">' +
+        '<h2>' + escapeHtml(group.neighborhood) + '</h2>' +
+        '<p><strong>Trees:</strong> ' + stats.count.toLocaleString() + ' | <strong>Avg rating:</strong> ' + stats.rating.toFixed(1) + '</p>' +
+        '<p><strong>Avg wait:</strong> ' + stats.wait.toFixed(1) + ' days | <strong>Avg access:</strong> ' + stats.access.toFixed(1) + '</p>' +
+        '<p><strong>Star doctors:</strong> ' + stats.stars.toLocaleString() + ' | <strong>Weekend:</strong> ' + weekendShare + '%</p>' +
+        '<p><strong>Top specialties:</strong> ' + pairSummary(stats.specialties, 3) + '</p>' +
+        '<p><strong>Provider types:</strong> ' + pairSummary(stats.types, 3) + '</p>' +
+        '<p><strong>Top species:</strong> ' + escapeHtml(group.topSpecies) + '</p>' +
+      '</div>';
+    }}
+
+    function marker(pair) {{
+      const dominantSpecialty = pair.stats.specialties.length ? pair.stats.specialties[0][0] : "";
+      const color = controls.specialty.value
+        ? (specialtyColors[controls.specialty.value] || "#2f7d4f")
+        : (specialtyColors[dominantSpecialty] || "#2f7d4f");
+      const marker = L.circleMarker([pair.group.lat, pair.group.lng], {{
+        renderer: canvasRenderer,
+        radius: radius(pair.stats),
+        color: pair.stats.stars ? "#111827" : color,
+        weight: pair.stats.stars ? 2.5 : 1.2,
+        fillColor: color,
         fillOpacity: 0.72
       }});
-      marker.bindTooltip(cluster.count.toLocaleString(), {{ permanent: true, direction: "center", className: "cluster-count" }});
-      marker.bindPopup(clusterPopup(cluster), {{ maxWidth: 320 }});
+      marker.bindPopup(popup(pair), {{ maxWidth: 380 }});
       return marker;
-    }}
-
-    function matches(row) {{
-      const specialty = document.getElementById("specialty").value;
-      const type = document.getElementById("providerType").value;
-      const query = document.getElementById("search").value.trim().toLowerCase();
-      const minRating = Number(document.getElementById("rating").value);
-      const starOnly = document.getElementById("starOnly").checked;
-      const weekendOnly = document.getElementById("weekendOnly").checked;
-
-      if (specialty && row.specialty !== specialty) return false;
-      if (type && row.type !== type) return false;
-      if (row.rating < minRating) return false;
-      if (starOnly && !row.star) return false;
-      if (weekendOnly && !row.weekend) return false;
-      if (query) {{
-        const haystack = (row.id + ' ' + row.species + ' ' + row.specialty + ' ' + row.type + ' ' + row.neighborhood).toLowerCase();
-        if (!haystack.includes(query)) return false;
-      }}
-      return true;
-    }}
-
-    function inCurrentBounds(row) {{
-      return map.getBounds().pad(0.08).contains([row.lat, row.lng]);
-    }}
-
-    function gridSizeForZoom(zoom) {{
-      if (zoom <= 10) return 70;
-      if (zoom <= 12) return 55;
-      if (zoom <= 14) return 42;
-      return 32;
-    }}
-
-    function buildClusters(items) {{
-      const gridSize = gridSizeForZoom(map.getZoom());
-      const buckets = new Map();
-      items.forEach(row => {{
-        const point = map.latLngToLayerPoint([row.lat, row.lng]);
-        const key = Math.floor(point.x / gridSize) + ':' + Math.floor(point.y / gridSize);
-        if (!buckets.has(key)) {{
-          buckets.set(key, {{
-            count: 0,
-            latSum: 0,
-            lngSum: 0,
-            ratingSum: 0,
-            stars: 0,
-            specialties: {{}}
-          }});
-        }}
-        const bucket = buckets.get(key);
-        bucket.count += 1;
-        bucket.latSum += row.lat;
-        bucket.lngSum += row.lng;
-        bucket.ratingSum += row.rating;
-        bucket.stars += row.star ? 1 : 0;
-        bucket.specialties[row.specialty] = (bucket.specialties[row.specialty] || 0) + 1;
-      }});
-
-      return Array.from(buckets.values()).map(bucket => {{
-        let specialty = "Mixed";
-        let specialtyCount = -1;
-        Object.entries(bucket.specialties).forEach(([name, count]) => {{
-          if (count > specialtyCount) {{
-            specialty = name;
-            specialtyCount = count;
-          }}
-        }});
-        return {{
-          count: bucket.count,
-          lat: bucket.latSum / bucket.count,
-          lng: bucket.lngSum / bucket.count,
-          avgRating: bucket.ratingSum / bucket.count,
-          stars: bucket.stars,
-          specialty
-        }};
-      }});
     }}
 
     function updateMap() {{
-      itemLayer.clearLayers();
-      const filtered = rows.filter(matches);
-      const inBounds = filtered.filter(inCurrentBounds);
-      const showIndividuals = map.getZoom() >= 16 || inBounds.length <= maxIndividualMarkers;
-      const drawn = showIndividuals ? inBounds : buildClusters(inBounds);
+      layer.clearLayers();
+      const visible = currentPairs();
+      visible.forEach(pair => layer.addLayer(marker(pair)));
 
-      drawn.forEach(item => {{
-        itemLayer.addLayer(showIndividuals ? makeTreeMarker(item) : makeClusterMarker(item));
-      }});
+      const trees = visible.reduce((sum, pair) => sum + pair.stats.count, 0);
+      const rating = trees ? visible.reduce((sum, pair) => sum + pair.stats.rating * pair.stats.count, 0) / trees : 0;
+      const stars = visible.reduce((sum, pair) => sum + pair.stats.stars, 0);
 
-      const count = filtered.length;
-      const rating = count ? filtered.reduce((sum, row) => sum + row.rating, 0) / count : 0;
-      const stars = filtered.filter(row => row.star).length;
-
-      document.getElementById("matchCount").textContent = count.toLocaleString();
-      document.getElementById("drawnCount").textContent = drawn.length.toLocaleString();
+      document.getElementById("treeCount").textContent = trees.toLocaleString();
+      document.getElementById("groupCount").textContent = visible.length.toLocaleString();
       document.getElementById("avgRating").textContent = rating.toFixed(1);
       document.getElementById("starCount").textContent = stars.toLocaleString();
-      document.getElementById("ratingValue").textContent = Number(document.getElementById("rating").value).toFixed(1);
-    }}
-
-    let updateTimer = null;
-    function scheduleUpdate() {{
-      clearTimeout(updateTimer);
-      updateTimer = setTimeout(updateMap, 40);
+      document.getElementById("ratingValue").textContent = Number(controls.rating.value).toFixed(1);
     }}
 
     ["specialty", "providerType", "search", "rating", "starOnly", "weekendOnly"].forEach(id => {{
-      document.getElementById(id).addEventListener("input", scheduleUpdate);
-      document.getElementById(id).addEventListener("change", scheduleUpdate);
+      document.getElementById(id).addEventListener("input", updateMap);
+      document.getElementById(id).addEventListener("change", updateMap);
     }});
-    map.on("moveend zoomend", scheduleUpdate);
 
     document.getElementById("reset").addEventListener("click", () => {{
-      document.getElementById("specialty").value = "";
-      document.getElementById("providerType").value = "";
-      document.getElementById("search").value = "";
-      document.getElementById("rating").value = "1.5";
-      document.getElementById("starOnly").checked = false;
-      document.getElementById("weekendOnly").checked = false;
-      map.setView([40.72, -73.94], 11);
+      controls.specialty.value = "";
+      controls.providerType.value = "";
+      controls.search.value = "";
+      controls.rating.value = "1.5";
+      controls.starOnly.checked = false;
+      controls.weekendOnly.checked = false;
       updateMap();
+      map.setView([40.72, -73.94], 11);
     }});
 
     updateMap();
@@ -496,10 +574,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output HTML map.")
     args = parser.parse_args()
 
-    rows = load_map_rows(args.input)
+    rows = load_map_groups(args.input)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_html(rows), encoding="utf-8")
-    print(f"Wrote {args.output} with {len(rows):,} mapped trees")
+    tree_count = sum(int(row["count"]) for row in rows)
+    print(f"Wrote {args.output} with {len(rows):,} neighborhood groups covering {tree_count:,} trees")
     print(f"Open directly: {args.output.resolve().as_uri()}")
     print("Or from the project root run: python3 -m http.server 8000")
     print("Then open: http://localhost:8000/docs/primary_tree_care_map.html")

@@ -17,7 +17,7 @@ The generated data is reproducible. Most features are derived from tree species,
 
 ## Interactive Map
 
-The interactive Primary Tree Care map is generated as a local HTML file from the local CSV data.
+The interactive Primary Tree Care map is generated as a local HTML file from the local CSV data. For browser speed, it draws 233 neighborhood circles instead of one marker per tree. Each circle recalculates its matching tree count, average rating, access score, wait time, star doctor count, weekend availability, specialty mix, provider-type mix, and top species when filters are changed.
 
 Build the map:
 

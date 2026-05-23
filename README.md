@@ -51,6 +51,8 @@ python scripts/build_primary_tree_care_map.py
 
 Then open the generated local file. The script prints a `file://...` URL you can paste into your browser.
 
+For browser speed, the map aggregates the 21,739 tree providers into 233 neighborhood circles. Specialty, provider type, rating, star doctor, weekend, and search filters recalculate the matching neighborhood totals without drawing one marker for every tree.
+
 You can also serve it from the project root:
 
 ```bash
