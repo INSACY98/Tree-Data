@@ -1,4 +1,10 @@
 const DATA_URL = "assets/trees_map.geojson";
+const QUALITY_COLORS = {
+  "Needs review": "#b42318",
+  Watchlist: "#d97706",
+  "Star quality": "#7c3aed",
+  "Looks stable": "#2f7d4f",
+};
 
 const controls = {
   search: document.getElementById("search"),
@@ -12,11 +18,11 @@ const controls = {
   status: document.getElementById("status"),
 };
 
-controls.status.textContent = "App loaded. Checking map library...";
+controls.status.textContent = "App loaded. Checking Leaflet map library...";
 
-if (typeof maplibregl === "undefined") {
-  controls.status.textContent = "Map library did not load. Check the network connection or CDN access for MapLibre.";
-  throw new Error("MapLibre GL JS did not load.");
+if (typeof L === "undefined") {
+  controls.status.textContent = "Leaflet map library did not load. Check the network connection or CDN access.";
+  throw new Error("Leaflet did not load.");
 }
 
 const metrics = {
@@ -28,73 +34,34 @@ const metrics = {
 };
 
 let fullData = null;
-let currentData = null;
+let currentFeatures = [];
 let updateTimer = null;
+let drawFrame = null;
 let hasFitToData = false;
-let mapReady = false;
 let controlsReady = false;
+let map = null;
+let canvas = null;
+let context = null;
 
-const map = new maplibregl.Map({
-  container: "map",
-  center: [-73.94, 40.72],
-  zoom: 10.6,
-  style: {
-    version: 8,
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-    sources: {
-      osm: {
-        type: "raster",
-        tiles: [
-          "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-          "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-          "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        ],
-        tileSize: 256,
-        attribution: "&copy; OpenStreetMap contributors",
-      },
-    },
-    layers: [
-      {
-        id: "osm",
-        type: "raster",
-        source: "osm",
-      },
-    ],
-  },
-});
+try {
+  map = L.map("map", {
+    preferCanvas: true,
+    zoomControl: true,
+  }).setView([40.72, -73.94], 11);
 
-map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
 
-map.on("error", (event) => {
-  const message = event?.error?.message || "Unknown map error";
-  if (!fullData) {
-    controls.status.textContent = `Map error: ${message}`;
-  }
-  console.error(event.error || event);
-});
-
-function renderWhenReady() {
-  if (!mapReady || !fullData) return;
-
-  if (!controlsReady) {
-    optionList(controls.specialty, fullData.metadata.specialties, "specialties");
-    optionList(controls.providerType, fullData.metadata.provider_types, "provider types");
-    wireControls();
-    controlsReady = true;
-  }
-
-  applyFilters();
-
-  if (!hasFitToData && fullData.features.length) {
-    const bounds = new maplibregl.LngLatBounds();
-    fullData.features.forEach((feature) => bounds.extend(feature.geometry.coordinates));
-    map.fitBounds(bounds, { padding: 36, duration: 0, maxZoom: 12 });
-    hasFitToData = true;
-  }
-}
-
-function emptyCollection() {
-  return { type: "FeatureCollection", features: [] };
+  canvas = L.DomUtil.create("canvas", "tree-canvas");
+  context = canvas.getContext("2d");
+  canvas.style.position = "absolute";
+  canvas.style.pointerEvents = "none";
+  map.getPanes().overlayPane.appendChild(canvas);
+} catch (error) {
+  controls.status.textContent = `Leaflet map could not start: ${error.message}`;
+  throw error;
 }
 
 function escapeHtml(value) {
@@ -139,6 +106,13 @@ function searchText(properties) {
   ].join(" ").toLowerCase();
 }
 
+function prepareFeature(feature) {
+  feature._lng = feature.geometry.coordinates[0];
+  feature._lat = feature.geometry.coordinates[1];
+  feature._search = searchText(feature.properties);
+  return feature;
+}
+
 function matchesFeature(feature) {
   const properties = feature.properties;
   const query = controls.search.value.trim().toLowerCase();
@@ -150,7 +124,7 @@ function matchesFeature(feature) {
   if (controls.starOnly.checked && !properties.star_doctor) return false;
   if (controls.problemOnly.checked && properties.tree_problem_count < 1) return false;
   if (controls.weekendOnly.checked && !properties.weekend_availability) return false;
-  if (query && !searchText(properties).includes(query)) return false;
+  if (query && !feature._search.includes(query)) return false;
   return true;
 }
 
@@ -167,16 +141,61 @@ function summarize(features) {
   metrics.ratingValue.textContent = Number(controls.rating.value).toFixed(1);
 }
 
-function colorExpression() {
-  return [
-    "match",
-    ["get", "quality_bucket"],
-    "Needs review", "#b42318",
-    "Watchlist", "#d97706",
-    "Star quality", "#7c3aed",
-    "Looks stable", "#2f7d4f",
-    "#64748b",
-  ];
+function pointRadius(zoom, isStar) {
+  if (zoom < 12) return isStar ? 3.8 : 2.3;
+  if (zoom < 15) return isStar ? 5.8 : 4.1;
+  return isStar ? 8.8 : 6.2;
+}
+
+function colorFor(properties) {
+  return QUALITY_COLORS[properties.quality_bucket] || "#64748b";
+}
+
+function resizeCanvas() {
+  const size = map.getSize();
+  const topLeft = map.containerPointToLayerPoint([0, 0]);
+  const ratio = window.devicePixelRatio || 1;
+
+  L.DomUtil.setPosition(canvas, topLeft);
+  canvas.width = size.x * ratio;
+  canvas.height = size.y * ratio;
+  canvas.style.width = `${size.x}px`;
+  canvas.style.height = `${size.y}px`;
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
+function drawTrees() {
+  drawFrame = null;
+  resizeCanvas();
+
+  const size = map.getSize();
+  context.clearRect(0, 0, size.x, size.y);
+
+  const bounds = map.getBounds().pad(0.08);
+  const zoom = map.getZoom();
+
+  currentFeatures.forEach((feature) => {
+    if (!bounds.contains([feature._lat, feature._lng])) return;
+
+    const point = map.latLngToContainerPoint([feature._lat, feature._lng]);
+    const radius = pointRadius(zoom, feature.properties.star_doctor);
+
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.fillStyle = colorFor(feature.properties);
+    context.globalAlpha = 0.88;
+    context.fill();
+
+    context.globalAlpha = 1;
+    context.lineWidth = feature.properties.star_doctor ? 2 : 1;
+    context.strokeStyle = feature.properties.star_doctor ? "#111827" : "#ffffff";
+    context.stroke();
+  });
+}
+
+function scheduleDraw() {
+  if (drawFrame) return;
+  drawFrame = window.requestAnimationFrame(drawTrees);
 }
 
 function popupHtml(properties) {
@@ -209,20 +228,37 @@ function popupHtml(properties) {
   `;
 }
 
-function updatePointColors() {
-  if (!map.getLayer("tree-points")) return;
-  map.setPaintProperty("tree-points", "circle-color", colorExpression());
+function nearestFeature(clickPoint) {
+  const bounds = map.getBounds().pad(0.08);
+  const zoom = map.getZoom();
+  let closest = null;
+  let closestDistance = Infinity;
+
+  currentFeatures.forEach((feature) => {
+    if (!bounds.contains([feature._lat, feature._lng])) return;
+
+    const point = map.latLngToContainerPoint([feature._lat, feature._lng]);
+    const dx = point.x - clickPoint.x;
+    const dy = point.y - clickPoint.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const hitRadius = Math.max(10, pointRadius(zoom, feature.properties.star_doctor) + 4);
+
+    if (distance <= hitRadius && distance < closestDistance) {
+      closest = feature;
+      closestDistance = distance;
+    }
+  });
+
+  return closest;
 }
 
 function applyFilters() {
   if (!fullData) return;
 
-  const features = fullData.features.filter(matchesFeature);
-  currentData = { type: "FeatureCollection", features };
-  map.getSource("trees").setData(currentData);
-  summarize(features);
-  updatePointColors();
-  controls.status.textContent = `${features.length.toLocaleString()} of ${fullData.features.length.toLocaleString()} mapped trees shown. Click any point to inspect its record.`;
+  currentFeatures = fullData.features.filter(matchesFeature);
+  summarize(currentFeatures);
+  scheduleDraw();
+  controls.status.textContent = `${currentFeatures.length.toLocaleString()} of ${fullData.features.length.toLocaleString()} mapped trees shown. Click any point to inspect its record.`;
 }
 
 function scheduleFilter() {
@@ -230,56 +266,9 @@ function scheduleFilter() {
   updateTimer = window.setTimeout(applyFilters, 90);
 }
 
-function addMapLayers() {
-  map.addSource("trees", {
-    type: "geojson",
-    data: emptyCollection(),
-  });
-
-  map.addLayer({
-    id: "tree-points",
-    type: "circle",
-    source: "trees",
-    paint: {
-      "circle-color": colorExpression(),
-      "circle-radius": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        9, 2.2,
-        13, 4.8,
-        17, 7.5,
-      ],
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": [
-        "case",
-        ["==", ["get", "star_doctor"], true],
-        2,
-        1,
-      ],
-      "circle-opacity": 0.88,
-    },
-  });
-}
-
-function wireMapEvents() {
-  map.on("click", "tree-points", (event) => {
-    const feature = event.features[0];
-    new maplibregl.Popup({ maxWidth: "380px" })
-      .setLngLat(feature.geometry.coordinates)
-      .setHTML(popupHtml(feature.properties))
-      .addTo(map);
-  });
-
-  map.on("mouseenter", "tree-points", () => {
-    map.getCanvas().style.cursor = "pointer";
-  });
-  map.on("mouseleave", "tree-points", () => {
-    map.getCanvas().style.cursor = "";
-  });
-}
-
 function wireControls() {
+  if (controlsReady) return;
+
   ["search", "specialty", "providerType", "rating", "starOnly", "problemOnly", "weekendOnly"].forEach((id) => {
     controls[id].addEventListener("input", scheduleFilter);
     controls[id].addEventListener("change", scheduleFilter);
@@ -294,8 +283,18 @@ function wireControls() {
     controls.problemOnly.checked = false;
     controls.weekendOnly.checked = false;
     applyFilters();
-    map.easeTo({ center: [-73.94, 40.72], zoom: 10.6 });
+    map.setView([40.72, -73.94], 11);
   });
+
+  controlsReady = true;
+}
+
+function fitToData() {
+  if (hasFitToData || !fullData.features.length) return;
+
+  const bounds = L.latLngBounds(fullData.features.map((feature) => [feature._lat, feature._lng]));
+  map.fitBounds(bounds, { padding: [36, 36], maxZoom: 12, animate: false });
+  hasFitToData = true;
 }
 
 async function loadData() {
@@ -306,18 +305,28 @@ async function loadData() {
   const text = await response.text();
   controls.status.textContent = `Downloaded tree data (${(text.length / 1024 / 1024).toFixed(1)} MB). Parsing...`;
   fullData = JSON.parse(text);
-  controls.status.textContent = `Parsed ${fullData.features.length.toLocaleString()} trees. Waiting for map...`;
-  renderWhenReady();
+  fullData.features = fullData.features.map(prepareFeature);
+
+  optionList(controls.specialty, fullData.metadata.specialties, "specialties");
+  optionList(controls.providerType, fullData.metadata.provider_types, "provider types");
+  wireControls();
+  applyFilters();
+  fitToData();
+  scheduleDraw();
 }
 
-map.on("load", async () => {
-  addMapLayers();
-  wireMapEvents();
-  mapReady = true;
-  renderWhenReady();
+map.on("move zoom resize", scheduleDraw);
+map.on("click", (event) => {
+  const feature = nearestFeature(event.containerPoint);
+  if (!feature) return;
+
+  L.popup({ maxWidth: 380 })
+    .setLatLng([feature._lat, feature._lng])
+    .setContent(popupHtml(feature.properties))
+    .openOn(map);
 });
 
 loadData().catch((error) => {
-  controls.status.textContent = `Map data did not load: ${error.message}. Confirm assets/trees_map.geojson is included in the deployed site.`;
+  controls.status.textContent = `Map data did not load: ${error.message}. Confirm assets/trees_map.geojson is available.`;
   console.error(error);
 });

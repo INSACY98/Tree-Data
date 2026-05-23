@@ -173,13 +173,13 @@
 
     async function checkLibrary() {
       try {
-        const response = await fetch("https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js", { cache: "force-cache" });
+        const response = await fetch("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js", { cache: "force-cache" });
         checks.library.innerHTML = response.ok
-          ? ok("MapLibre CDN is reachable from this browser.")
-          : warn(`MapLibre CDN returned HTTP ${response.status}. The data can load, but the map may not draw.`);
+          ? ok("Leaflet CDN is reachable from this browser.")
+          : warn(`Leaflet CDN returned HTTP ${response.status}. The data can load, but the map may not draw.`);
         return response.ok;
       } catch (error) {
-        checks.library.innerHTML = warn(`MapLibre CDN could not be reached: ${error.message}`);
+        checks.library.innerHTML = warn(`Leaflet CDN could not be reached: ${error.message}`);
         return false;
       }
     }
