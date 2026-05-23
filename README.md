@@ -98,3 +98,11 @@ netlify deploy --dir site --prod
 ```
 
 The generated `site/assets/trees_map.geojson` file is intentionally ignored by Git. A manual Netlify deploy uploads it to the hosted site without committing the data to GitHub.
+
+No-CLI deploy option:
+
+1. Build the map data with `python scripts/build_netlify_map_data.py`.
+2. Drag the local `site/` folder into Netlify Drop.
+3. Or unzip `deploy/primary-tree-care-netlify.zip` and drag the unzipped folder into Netlify Drop.
+
+The `deploy/` folder is local-only because it contains the generated tree data.

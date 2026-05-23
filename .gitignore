@@ -6,4 +6,5 @@ data/
 notebooks/
 docs/*.html
 site/assets/trees_map.geojson
+deploy/
 *.pyc
