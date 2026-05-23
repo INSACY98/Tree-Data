@@ -49,10 +49,18 @@ source .venv/bin/activate
 python scripts/build_primary_tree_care_map.py
 ```
 
+Then open the generated local file. The script prints a `file://...` URL you can paste into your browser.
+
+You can also serve it from the project root:
+
+```bash
+python3 -m http.server 8000
+```
+
 Then open:
 
 ```text
-docs/primary_tree_care_map.html
+http://localhost:8000/docs/primary_tree_care_map.html
 ```
 
-The generated HTML map is ignored by Git because it embeds local data.
+The generated HTML map is ignored by Git because it embeds local data. The GitHub Markdown link will not work until you generate the file locally, and GitHub will not render the iframe because it blocks interactive JavaScript in Markdown.

@@ -420,6 +420,9 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(render_html(rows), encoding="utf-8")
     print(f"Wrote {args.output} with {len(rows):,} mapped trees")
+    print(f"Open directly: {args.output.resolve().as_uri()}")
+    print("Or from the project root run: python3 -m http.server 8000")
+    print("Then open: http://localhost:8000/docs/primary_tree_care_map.html")
 
 
 if __name__ == "__main__":

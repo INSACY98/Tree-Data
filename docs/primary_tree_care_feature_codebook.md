@@ -29,7 +29,21 @@ Open the generated map:
 
 [Open local interactive map](primary_tree_care_map.html)
 
-The generated file is `docs/primary_tree_care_map.html`. It is intentionally ignored by Git because it embeds local provider data.
+The generated file is `docs/primary_tree_care_map.html`. It is intentionally ignored by Git because it embeds local provider data, so the link above only works in your local folder after you run the map builder. It will not work from GitHub.
+
+If double-clicking the HTML file does not work, serve the project folder locally:
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open:
+
+```text
+http://localhost:8000/docs/primary_tree_care_map.html
+```
+
+The map uses Leaflet and OpenStreetMap tiles from the web, so it needs internet access for the basemap and map library.
 
 For Markdown viewers that allow iframes, the map can be displayed with:
 
