@@ -15,6 +15,33 @@ Care is assumed to be public and open to everyone, so the dataset does not inclu
 
 The generated data is reproducible. Most features are derived from tree species, tree diameter, tree condition, tree problems, stewardship, guard status, favorite status, and physical location. Controlled randomness is seeded by `tree_id` and feature names.
 
+## Interactive Map
+
+GitHub Markdown does not execute JavaScript or render embedded interactive maps directly. The interactive Primary Tree Care map is generated as a local HTML file from the local CSV data.
+
+Build the map:
+
+```bash
+python scripts/build_primary_tree_care_map.py
+```
+
+Open the generated map:
+
+[Open local interactive map](primary_tree_care_map.html)
+
+The generated file is `docs/primary_tree_care_map.html`. It is intentionally ignored by Git because it embeds local provider data.
+
+For Markdown viewers that allow iframes, the map can be displayed with:
+
+```html
+<iframe
+  src="primary_tree_care_map.html"
+  width="100%"
+  height="720"
+  style="border: 1px solid #d9e1dc; border-radius: 8px;"
+></iframe>
+```
+
 ## Specialty Mapping Method
 
 `medical_specialty` is the most important fictional transformation. It is assigned at the species level, not row by row. This means every tree with the same `species_common` + `species_scientific` receives the same specialty.
