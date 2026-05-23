@@ -42,7 +42,7 @@ The script reads `data/processed/trees_with_favorites_live.csv` and writes `data
 
 ## Interactive Map
 
-GitHub Markdown does not run interactive JavaScript maps directly. To view the local map:
+Create the local interactive map:
 
 ```bash
 source .venv/bin/activate
@@ -63,4 +63,4 @@ Then open:
 http://localhost:8000/docs/primary_tree_care_map.html
 ```
 
-The generated HTML map is ignored by Git because it embeds local data. The GitHub Markdown link will not work until you generate the file locally, and GitHub will not render the iframe because it blocks interactive JavaScript in Markdown.
+The generated HTML map is local-only because it embeds the provider data.

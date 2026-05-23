@@ -17,7 +17,7 @@ The generated data is reproducible. Most features are derived from tree species,
 
 ## Interactive Map
 
-GitHub Markdown does not execute JavaScript or render embedded interactive maps directly. The interactive Primary Tree Care map is generated as a local HTML file from the local CSV data.
+The interactive Primary Tree Care map is generated as a local HTML file from the local CSV data.
 
 Build the map:
 
@@ -29,7 +29,7 @@ Open the generated map:
 
 [Open local interactive map](primary_tree_care_map.html)
 
-The generated file is `docs/primary_tree_care_map.html`. It is intentionally ignored by Git because it embeds local provider data, so the link above only works in your local folder after you run the map builder. It will not work from GitHub.
+The generated file is `docs/primary_tree_care_map.html`.
 
 If double-clicking the HTML file does not work, serve the project folder locally:
 
@@ -44,17 +44,6 @@ http://localhost:8000/docs/primary_tree_care_map.html
 ```
 
 The map uses Leaflet and OpenStreetMap tiles from the web, so it needs internet access for the basemap and map library.
-
-For Markdown viewers that allow iframes, the map can be displayed with:
-
-```html
-<iframe
-  src="primary_tree_care_map.html"
-  width="100%"
-  height="720"
-  style="border: 1px solid #d9e1dc; border-radius: 8px;"
-></iframe>
-```
 
 ## Specialty Mapping Method
 
