@@ -24,10 +24,8 @@ MAP_FIELDS = [
     "care_accessibility_score",
     "clinic_address",
     "clinic_neighborhood",
-    "clinic_city",
     "clinic_latitude",
     "clinic_longitude",
-    "care_philosophy",
     "signature_prescription",
     "waiting_room_feature",
 ]
@@ -59,10 +57,8 @@ def load_map_rows(input_csv: Path) -> list[dict[str, object]]:
                 "access": int(item["care_accessibility_score"]),
                 "address": str(item["clinic_address"]),
                 "neighborhood": str(item["clinic_neighborhood"]),
-                "city": str(item["clinic_city"]),
                 "lat": round(float(item["clinic_latitude"]), 6),
                 "lng": round(float(item["clinic_longitude"]), 6),
-                "philosophy": str(item["care_philosophy"]),
                 "prescription": str(item["signature_prescription"]),
                 "waiting": str(item["waiting_room_feature"]),
             }
@@ -118,10 +114,12 @@ def render_html(rows: list[dict[str, object]]) -> str:
       line-height: 1.15;
       margin: 0 0 8px;
     }}
-    .subtitle {{
+    .subtitle, .legend {{
       color: var(--muted);
       font-size: 13px;
       line-height: 1.45;
+    }}
+    .subtitle {{
       margin-bottom: 16px;
     }}
     .metric-grid {{
@@ -197,9 +195,6 @@ def render_html(rows: list[dict[str, object]]) -> str:
       margin-top: 16px;
       border-top: 1px solid var(--line);
       padding-top: 12px;
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.45;
     }}
     .popup h2 {{
       font-size: 16px;
@@ -228,13 +223,13 @@ def render_html(rows: list[dict[str, object]]) -> str:
   <div id="app">
     <aside>
       <h1>Primary Tree Care Map</h1>
-      <div class="subtitle">Interactive local map of NYC trees reimagined as public primary-care providers. Marker color is specialty; marker size responds to rating and star status.</div>
+      <div class="subtitle">Clustered local map of NYC trees reimagined as public primary-care providers. Zoom in or filter to see individual trees.</div>
 
       <div class="metric-grid">
-        <div class="metric"><strong id="visibleCount">0</strong><span>visible trees</span></div>
+        <div class="metric"><strong id="matchCount">0</strong><span>matching trees</span></div>
+        <div class="metric"><strong id="drawnCount">0</strong><span>drawn map items</span></div>
         <div class="metric"><strong id="avgRating">0.0</strong><span>avg care rating</span></div>
         <div class="metric"><strong id="starCount">0</strong><span>star doctors</span></div>
-        <div class="metric"><strong id="weekendCount">0</strong><span>weekend trees</span></div>
       </div>
 
       <label for="specialty">Specialty</label>
@@ -257,7 +252,7 @@ def render_html(rows: list[dict[str, object]]) -> str:
       <button id="reset">Reset Filters</button>
 
       <div class="legend">
-        This file is generated locally from <code>data/processed/primary_tree_care_providers.csv</code>. It is not committed to GitHub because the map embeds local provider data.
+        Large result sets are clustered for browser stability. Individual tree markers appear when you zoom in or narrow the filters.
       </div>
     </aside>
     <main id="map"></main>
@@ -268,6 +263,7 @@ def render_html(rows: list[dict[str, object]]) -> str:
     const rows = {payload};
     const specialties = {specialties_json};
     const providerTypes = {provider_types_json};
+    const maxIndividualMarkers = 1200;
     const specialtyColors = {{
       "Allergy/Immunology": "#d97706",
       "Cardiology": "#dc2626",
@@ -292,14 +288,13 @@ def render_html(rows: list[dict[str, object]]) -> str:
       attribution: "&copy; OpenStreetMap contributors"
     }}).addTo(map);
 
-    const markerLayer = L.layerGroup().addTo(map);
-    const markerById = new Map();
+    const itemLayer = L.layerGroup().addTo(map);
 
     function optionList(select, values, label) {{
       select.innerHTML = "";
       const all = document.createElement("option");
       all.value = "";
-      all.textContent = `All ${{label}}`;
+      all.textContent = "All " + label;
       select.appendChild(all);
       values.forEach(value => {{
         const option = document.createElement("option");
@@ -313,24 +308,33 @@ def render_html(rows: list[dict[str, object]]) -> str:
     optionList(document.getElementById("providerType"), providerTypes, "provider types");
 
     function markerRadius(row) {{
-      const base = 3.5 + Math.max(0, row.rating - 3) * 1.6;
+      const base = 4 + Math.max(0, row.rating - 3) * 1.4;
       return row.star ? base + 3 : base;
     }}
 
-    function popupHtml(row) {{
-      const star = row.star ? "Star doctor" : "Neighborhood regular";
-      return `<div class="popup">
-        <h2>${{row.species}} #${{row.id}}</h2>
-        <p><strong>${{row.specialty}}</strong> · ${{row.type}}</p>
-        <p><strong>Rating:</strong> ${{row.rating.toFixed(1)}} · <strong>Access:</strong> ${{row.access}} · <strong>Wait:</strong> ${{row.wait}} days</p>
-        <p><strong>Badge:</strong> ${{star}} · <strong>Weekend:</strong> ${{row.weekend ? "Yes" : "Taking a break"}}</p>
-        <p><strong>Location:</strong> ${{row.address}}, ${{row.neighborhood}}</p>
-        <p><strong>Prescription:</strong> ${{row.prescription}}</p>
-        <p><strong>Waiting room:</strong> ${{row.waiting}}</p>
-      </div>`;
+    function treePopup(row) {{
+      return '<div class="popup">' +
+        '<h2>' + row.species + ' #' + row.id + '</h2>' +
+        '<p><strong>' + row.specialty + '</strong> · ' + row.type + '</p>' +
+        '<p><strong>Rating:</strong> ' + row.rating.toFixed(1) + ' · <strong>Access:</strong> ' + row.access + ' · <strong>Wait:</strong> ' + row.wait + ' days</p>' +
+        '<p><strong>Weekend:</strong> ' + (row.weekend ? 'Yes' : 'Taking a break') + '</p>' +
+        '<p><strong>Location:</strong> ' + row.address + ', ' + row.neighborhood + '</p>' +
+        '<p><strong>Prescription:</strong> ' + row.prescription + '</p>' +
+        '<p><strong>Waiting room:</strong> ' + row.waiting + '</p>' +
+      '</div>';
     }}
 
-    function makeMarker(row) {{
+    function clusterPopup(cluster) {{
+      return '<div class="popup">' +
+        '<h2>' + cluster.count.toLocaleString() + ' care trees</h2>' +
+        '<p><strong>Dominant specialty:</strong> ' + cluster.specialty + '</p>' +
+        '<p><strong>Avg rating:</strong> ' + cluster.avgRating.toFixed(1) + '</p>' +
+        '<p><strong>Star doctors:</strong> ' + cluster.stars.toLocaleString() + '</p>' +
+        '<p>Zoom in to inspect individual tree providers.</p>' +
+      '</div>';
+    }}
+
+    function makeTreeMarker(row) {{
       const marker = L.circleMarker([row.lat, row.lng], {{
         renderer: L.canvas(),
         radius: markerRadius(row),
@@ -339,11 +343,24 @@ def render_html(rows: list[dict[str, object]]) -> str:
         fillColor: specialtyColors[row.specialty] || "#334155",
         fillOpacity: row.star ? 0.92 : 0.68
       }});
-      marker.bindPopup(popupHtml(row), {{ maxWidth: 360 }});
+      marker.bindPopup(treePopup(row), {{ maxWidth: 360 }});
       return marker;
     }}
 
-    rows.forEach(row => markerById.set(row.id, makeMarker(row)));
+    function makeClusterMarker(cluster) {{
+      const radius = Math.min(28, 7 + Math.sqrt(cluster.count) * 1.7);
+      const marker = L.circleMarker([cluster.lat, cluster.lng], {{
+        renderer: L.canvas(),
+        radius,
+        color: "#18392b",
+        weight: 1.5,
+        fillColor: specialtyColors[cluster.specialty] || "#2f7d4f",
+        fillOpacity: 0.72
+      }});
+      marker.bindTooltip(cluster.count.toLocaleString(), {{ permanent: true, direction: "center", className: "cluster-count" }});
+      marker.bindPopup(clusterPopup(cluster), {{ maxWidth: 320 }});
+      return marker;
+    }}
 
     function matches(row) {{
       const specialty = document.getElementById("specialty").value;
@@ -359,38 +376,101 @@ def render_html(rows: list[dict[str, object]]) -> str:
       if (starOnly && !row.star) return false;
       if (weekendOnly && !row.weekend) return false;
       if (query) {{
-        const haystack = `${{row.id}} ${{row.species}} ${{row.specialty}} ${{row.type}} ${{row.neighborhood}} ${{row.city}}`.toLowerCase();
+        const haystack = (row.id + ' ' + row.species + ' ' + row.specialty + ' ' + row.type + ' ' + row.neighborhood).toLowerCase();
         if (!haystack.includes(query)) return false;
       }}
       return true;
     }}
 
-    function updateMap() {{
-      markerLayer.clearLayers();
-      const visible = [];
-      rows.forEach(row => {{
-        if (matches(row)) {{
-          visible.push(row);
-          markerLayer.addLayer(markerById.get(row.id));
+    function inCurrentBounds(row) {{
+      return map.getBounds().pad(0.08).contains([row.lat, row.lng]);
+    }}
+
+    function gridSizeForZoom(zoom) {{
+      if (zoom <= 10) return 70;
+      if (zoom <= 12) return 55;
+      if (zoom <= 14) return 42;
+      return 32;
+    }}
+
+    function buildClusters(items) {{
+      const gridSize = gridSizeForZoom(map.getZoom());
+      const buckets = new Map();
+      items.forEach(row => {{
+        const point = map.latLngToLayerPoint([row.lat, row.lng]);
+        const key = Math.floor(point.x / gridSize) + ':' + Math.floor(point.y / gridSize);
+        if (!buckets.has(key)) {{
+          buckets.set(key, {{
+            count: 0,
+            latSum: 0,
+            lngSum: 0,
+            ratingSum: 0,
+            stars: 0,
+            specialties: {{}}
+          }});
         }}
+        const bucket = buckets.get(key);
+        bucket.count += 1;
+        bucket.latSum += row.lat;
+        bucket.lngSum += row.lng;
+        bucket.ratingSum += row.rating;
+        bucket.stars += row.star ? 1 : 0;
+        bucket.specialties[row.specialty] = (bucket.specialties[row.specialty] || 0) + 1;
       }});
 
-      const count = visible.length;
-      const rating = count ? visible.reduce((sum, row) => sum + row.rating, 0) / count : 0;
-      const stars = visible.filter(row => row.star).length;
-      const weekends = visible.filter(row => row.weekend).length;
+      return Array.from(buckets.values()).map(bucket => {{
+        let specialty = "Mixed";
+        let specialtyCount = -1;
+        Object.entries(bucket.specialties).forEach(([name, count]) => {{
+          if (count > specialtyCount) {{
+            specialty = name;
+            specialtyCount = count;
+          }}
+        }});
+        return {{
+          count: bucket.count,
+          lat: bucket.latSum / bucket.count,
+          lng: bucket.lngSum / bucket.count,
+          avgRating: bucket.ratingSum / bucket.count,
+          stars: bucket.stars,
+          specialty
+        }};
+      }});
+    }}
 
-      document.getElementById("visibleCount").textContent = count.toLocaleString();
+    function updateMap() {{
+      itemLayer.clearLayers();
+      const filtered = rows.filter(matches);
+      const inBounds = filtered.filter(inCurrentBounds);
+      const showIndividuals = map.getZoom() >= 16 || inBounds.length <= maxIndividualMarkers;
+      const drawn = showIndividuals ? inBounds : buildClusters(inBounds);
+
+      drawn.forEach(item => {{
+        itemLayer.addLayer(showIndividuals ? makeTreeMarker(item) : makeClusterMarker(item));
+      }});
+
+      const count = filtered.length;
+      const rating = count ? filtered.reduce((sum, row) => sum + row.rating, 0) / count : 0;
+      const stars = filtered.filter(row => row.star).length;
+
+      document.getElementById("matchCount").textContent = count.toLocaleString();
+      document.getElementById("drawnCount").textContent = drawn.length.toLocaleString();
       document.getElementById("avgRating").textContent = rating.toFixed(1);
       document.getElementById("starCount").textContent = stars.toLocaleString();
-      document.getElementById("weekendCount").textContent = weekends.toLocaleString();
       document.getElementById("ratingValue").textContent = Number(document.getElementById("rating").value).toFixed(1);
     }}
 
+    let updateTimer = null;
+    function scheduleUpdate() {{
+      clearTimeout(updateTimer);
+      updateTimer = setTimeout(updateMap, 40);
+    }}
+
     ["specialty", "providerType", "search", "rating", "starOnly", "weekendOnly"].forEach(id => {{
-      document.getElementById(id).addEventListener("input", updateMap);
-      document.getElementById(id).addEventListener("change", updateMap);
+      document.getElementById(id).addEventListener("input", scheduleUpdate);
+      document.getElementById(id).addEventListener("change", scheduleUpdate);
     }});
+    map.on("moveend zoomend", scheduleUpdate);
 
     document.getElementById("reset").addEventListener("click", () => {{
       document.getElementById("specialty").value = "";
@@ -399,8 +479,8 @@ def render_html(rows: list[dict[str, object]]) -> str:
       document.getElementById("rating").value = "1.5";
       document.getElementById("starOnly").checked = false;
       document.getElementById("weekendOnly").checked = false;
-      updateMap();
       map.setView([40.72, -73.94], 11);
+      updateMap();
     }});
 
     updateMap();
