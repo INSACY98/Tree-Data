@@ -4,8 +4,6 @@ const controls = {
   search: document.getElementById("search"),
   specialty: document.getElementById("specialty"),
   providerType: document.getElementById("providerType"),
-  quality: document.getElementById("quality"),
-  colorBy: document.getElementById("colorBy"),
   rating: document.getElementById("rating"),
   starOnly: document.getElementById("starOnly"),
   problemOnly: document.getElementById("problemOnly"),
@@ -95,15 +93,6 @@ function optionList(select, values, label) {
   });
 }
 
-function uniqueProperty(features, property) {
-  return [...new Set(features.map((feature) => feature.properties[property]).filter(Boolean))].sort();
-}
-
-function qualityOrder(values) {
-  const order = ["Needs review", "Watchlist", "Looks stable", "Star quality"];
-  return values.sort((a, b) => order.indexOf(a) - order.indexOf(b));
-}
-
 function searchText(properties) {
   return [
     properties.provider_id,
@@ -128,7 +117,6 @@ function matchesFeature(feature) {
 
   if (controls.specialty.value && properties.medical_specialty !== controls.specialty.value) return false;
   if (controls.providerType.value && properties.provider_type !== controls.providerType.value) return false;
-  if (controls.quality.value && properties.quality_bucket !== controls.quality.value) return false;
   if (properties.care_rating < minRating) return false;
   if (controls.starOnly.checked && !properties.star_doctor) return false;
   if (controls.problemOnly.checked && properties.tree_problem_count < 1) return false;
@@ -151,53 +139,6 @@ function summarize(features) {
 }
 
 function colorExpression() {
-  if (controls.colorBy.value === "medical_specialty") {
-    return [
-      "match",
-      ["get", "medical_specialty"],
-      "Allergy/Immunology", "#d97706",
-      "Cardiology", "#dc2626",
-      "Dermatology", "#f97316",
-      "Endocrinology", "#9333ea",
-      "Family Medicine", "#16a34a",
-      "Gastroenterology", "#a16207",
-      "Geriatrics", "#64748b",
-      "Internal Medicine", "#2563eb",
-      "Neurology", "#7c3aed",
-      "Pediatrics", "#db2777",
-      "Preventive Medicine", "#059669",
-      "Psychiatry", "#0891b2",
-      "Pulmonology", "#0d9488",
-      "Sports Medicine", "#65a30d",
-      "Women's Health", "#e11d48",
-      "#334155",
-    ];
-  }
-
-  if (controls.colorBy.value === "care_rating") {
-    return [
-      "interpolate",
-      ["linear"],
-      ["get", "care_rating"],
-      1.5, "#b42318",
-      3.0, "#d97706",
-      4.0, "#2f7d4f",
-      5.0, "#14532d",
-    ];
-  }
-
-  if (controls.colorBy.value === "problem_burden_level") {
-    return [
-      "match",
-      ["get", "problem_burden_level"],
-      "High", "#b42318",
-      "Medium", "#d97706",
-      "Low", "#2f7d4f",
-      "None", "#2563eb",
-      "#64748b",
-    ];
-  }
-
   return [
     "match",
     ["get", "quality_bucket"],
@@ -310,19 +251,15 @@ function wireMapEvents() {
 }
 
 function wireControls() {
-  ["search", "specialty", "providerType", "quality", "rating", "starOnly", "problemOnly", "weekendOnly"].forEach((id) => {
+  ["search", "specialty", "providerType", "rating", "starOnly", "problemOnly", "weekendOnly"].forEach((id) => {
     controls[id].addEventListener("input", scheduleFilter);
     controls[id].addEventListener("change", scheduleFilter);
   });
-
-  controls.colorBy.addEventListener("change", updatePointColors);
 
   controls.reset.addEventListener("click", () => {
     controls.search.value = "";
     controls.specialty.value = "";
     controls.providerType.value = "";
-    controls.quality.value = "";
-    controls.colorBy.value = "quality_bucket";
     controls.rating.value = "1.5";
     controls.starOnly.checked = false;
     controls.problemOnly.checked = false;
@@ -340,7 +277,6 @@ async function loadData() {
 
   optionList(controls.specialty, fullData.metadata.specialties, "specialties");
   optionList(controls.providerType, fullData.metadata.provider_types, "provider types");
-  optionList(controls.quality, qualityOrder(uniqueProperty(fullData.features, "quality_bucket")), "quality buckets");
   applyFilters();
 
   if (!hasFitToData && fullData.features.length) {
