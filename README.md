@@ -108,3 +108,5 @@ No-CLI deploy option:
 The `deploy/` folder is local-only because it contains the generated tree data.
 
 If the deployed page stays on `Loading map data...`, the browser is probably still serving an older deploy or `app.js` did not load. The current app should change the status through `App loaded`, `Fetching tree data`, `Downloaded tree data`, and then the final mapped tree count. If it says `Map data did not load`, check that `assets/trees_map.geojson` is inside the folder you deployed.
+
+You can also open `/deploy-check.html` on the Netlify site. It tests the deployed `index.html`, `app.js`, MapLibre CDN, and `assets/trees_map.geojson` paths directly.

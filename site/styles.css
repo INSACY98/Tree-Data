@@ -53,6 +53,15 @@ header p,
   margin: 0;
 }
 
+.deploy-note {
+  margin-top: 6px;
+}
+
+.deploy-note a {
+  color: var(--accent);
+  font-weight: 750;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: 1fr 1fr;

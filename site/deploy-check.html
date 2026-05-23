@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Primary Tree Care Deploy Check</title>
+  <style>
+    :root {
+      --ink: #17231f;
+      --muted: #5f6d68;
+      --line: #d8e2dc;
+      --ok: #2f7d4f;
+      --bad: #b42318;
+      --warn: #d97706;
+    }
+
+    body {
+      background: #eef4f0;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 28px;
+    }
+
+    main {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 16px 36px rgba(31, 55, 44, 0.12);
+      margin: 0 auto;
+      max-width: 860px;
+      padding: 22px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin: 0 0 8px;
+    }
+
+    p {
+      color: var(--muted);
+      line-height: 1.45;
+      margin: 0 0 18px;
+    }
+
+    .row {
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 6px;
+      grid-template-columns: 190px 1fr;
+      padding: 13px 0;
+    }
+
+    .label {
+      font-weight: 800;
+    }
+
+    .ok {
+      color: var(--ok);
+      font-weight: 800;
+    }
+
+    .bad {
+      color: var(--bad);
+      font-weight: 800;
+    }
+
+    .warn {
+      color: var(--warn);
+      font-weight: 800;
+    }
+
+    code {
+      background: #f4f7f5;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 2px 5px;
+    }
+
+    a {
+      color: var(--ok);
+      font-weight: 750;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Primary Tree Care Deploy Check</h1>
+    <p>This page checks whether the deployed Netlify URL can read the files needed by the map.</p>
+
+    <div class="row">
+      <div class="label">Current URL</div>
+      <div id="currentUrl"></div>
+    </div>
+    <div class="row">
+      <div class="label">Page root</div>
+      <div id="rootCheck">Checking...</div>
+    </div>
+    <div class="row">
+      <div class="label">App JavaScript</div>
+      <div id="appCheck">Checking...</div>
+    </div>
+    <div class="row">
+      <div class="label">Map library CDN</div>
+      <div id="libraryCheck">Checking...</div>
+    </div>
+    <div class="row">
+      <div class="label">Tree GeoJSON</div>
+      <div id="dataCheck">Checking...</div>
+    </div>
+    <div class="row">
+      <div class="label">Next step</div>
+      <div id="nextStep">Waiting for checks...</div>
+    </div>
+  </main>
+
+  <script>
+    const checks = {
+      currentUrl: document.getElementById("currentUrl"),
+      root: document.getElementById("rootCheck"),
+      app: document.getElementById("appCheck"),
+      library: document.getElementById("libraryCheck"),
+      data: document.getElementById("dataCheck"),
+      next: document.getElementById("nextStep"),
+    };
+
+    checks.currentUrl.textContent = window.location.href;
+
+    function ok(message) {
+      return `<span class="ok">OK</span> ${message}`;
+    }
+
+    function bad(message) {
+      return `<span class="bad">Problem</span> ${message}`;
+    }
+
+    function warn(message) {
+      return `<span class="warn">Check</span> ${message}`;
+    }
+
+    async function head(path) {
+      const response = await fetch(path, { cache: "no-store" });
+      return response;
+    }
+
+    async function checkRoot() {
+      try {
+        const response = await head("index.html");
+        checks.root.innerHTML = response.ok
+          ? ok(`<code>index.html</code> is available at this URL.`)
+          : bad(`<code>index.html</code> returned HTTP ${response.status}.`);
+        return response.ok;
+      } catch (error) {
+        checks.root.innerHTML = bad(`Could not fetch <code>index.html</code>: ${error.message}`);
+        return false;
+      }
+    }
+
+    async function checkApp() {
+      try {
+        const response = await head("app.js");
+        const text = response.ok ? await response.text() : "";
+        const hasDiagnosticVersion = text.includes("Fetching tree data");
+        checks.app.innerHTML = response.ok
+          ? ok(`<code>app.js</code> loaded. ${hasDiagnosticVersion ? "This is the current diagnostic version." : "This may be an older version."}`)
+          : bad(`<code>app.js</code> returned HTTP ${response.status}.`);
+        return response.ok && hasDiagnosticVersion;
+      } catch (error) {
+        checks.app.innerHTML = bad(`Could not fetch <code>app.js</code>: ${error.message}`);
+        return false;
+      }
+    }
+
+    async function checkLibrary() {
+      try {
+        const response = await fetch("https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js", { cache: "force-cache" });
+        checks.library.innerHTML = response.ok
+          ? ok("MapLibre CDN is reachable from this browser.")
+          : warn(`MapLibre CDN returned HTTP ${response.status}. The data can load, but the map may not draw.`);
+        return response.ok;
+      } catch (error) {
+        checks.library.innerHTML = warn(`MapLibre CDN could not be reached: ${error.message}`);
+        return false;
+      }
+    }
+
+    async function checkData() {
+      try {
+        const response = await head("assets/trees_map.geojson");
+        if (!response.ok) {
+          checks.data.innerHTML = bad(`<code>assets/trees_map.geojson</code> returned HTTP ${response.status}.`);
+          return false;
+        }
+
+        const text = await response.text();
+        const json = JSON.parse(text);
+        const count = json.features ? json.features.length : 0;
+        checks.data.innerHTML = count
+          ? ok(`<code>assets/trees_map.geojson</code> loaded with ${count.toLocaleString()} tree features (${(text.length / 1024 / 1024).toFixed(1)} MB).`)
+          : bad("GeoJSON loaded, but it does not contain tree features.");
+        return count > 0;
+      } catch (error) {
+        checks.data.innerHTML = bad(`Could not read <code>assets/trees_map.geojson</code>: ${error.message}`);
+        return false;
+      }
+    }
+
+    async function run() {
+      const rootOk = await checkRoot();
+      const appOk = await checkApp();
+      const libraryOk = await checkLibrary();
+      const dataOk = await checkData();
+
+      if (rootOk && appOk && dataOk) {
+        checks.next.innerHTML = ok(`The deployed files are present. Open <a href="index.html">the map</a>. If your main Netlify URL is blank, you are probably looking at an older production deploy; publish this deploy to production.`);
+      } else if (!dataOk) {
+        checks.next.innerHTML = bad("Redeploy the local <code>site/</code> folder, not the GitHub repo alone. The deployed folder must include <code>assets/trees_map.geojson</code>.");
+      } else if (!appOk) {
+        checks.next.innerHTML = bad("This URL is serving an older or incomplete deploy. Redeploy the current local <code>site/</code> folder.");
+      } else if (!libraryOk) {
+        checks.next.innerHTML = warn("Data is present, but the map library CDN is blocked or slow from this browser/network.");
+      } else {
+        checks.next.innerHTML = bad("The deploy root is incomplete. Make sure <code>index.html</code> is at the top level of the uploaded folder.");
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>
