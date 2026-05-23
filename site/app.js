@@ -12,6 +12,13 @@ const controls = {
   status: document.getElementById("status"),
 };
 
+controls.status.textContent = "App loaded. Checking map library...";
+
+if (typeof maplibregl === "undefined") {
+  controls.status.textContent = "Map library did not load. Check the network connection or CDN access for MapLibre.";
+  throw new Error("MapLibre GL JS did not load.");
+}
+
 const metrics = {
   matches: document.getElementById("metricMatches"),
   rating: document.getElementById("metricRating"),
@@ -24,6 +31,8 @@ let fullData = null;
 let currentData = null;
 let updateTimer = null;
 let hasFitToData = false;
+let mapReady = false;
+let controlsReady = false;
 
 const map = new maplibregl.Map({
   container: "map",
@@ -63,6 +72,26 @@ map.on("error", (event) => {
   }
   console.error(event.error || event);
 });
+
+function renderWhenReady() {
+  if (!mapReady || !fullData) return;
+
+  if (!controlsReady) {
+    optionList(controls.specialty, fullData.metadata.specialties, "specialties");
+    optionList(controls.providerType, fullData.metadata.provider_types, "provider types");
+    wireControls();
+    controlsReady = true;
+  }
+
+  applyFilters();
+
+  if (!hasFitToData && fullData.features.length) {
+    const bounds = new maplibregl.LngLatBounds();
+    fullData.features.forEach((feature) => bounds.extend(feature.geometry.coordinates));
+    map.fitBounds(bounds, { padding: 36, duration: 0, maxZoom: 12 });
+    hasFitToData = true;
+  }
+}
 
 function emptyCollection() {
   return { type: "FeatureCollection", features: [] };
@@ -270,32 +299,25 @@ function wireControls() {
 }
 
 async function loadData() {
-  const response = await fetch(DATA_URL);
-  if (!response.ok) throw new Error(`Could not load ${DATA_URL}`);
-  controls.status.textContent = "Loaded data file. Drawing tree points...";
-  fullData = await response.json();
+  controls.status.textContent = "Fetching tree data...";
+  const response = await fetch(DATA_URL, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not load ${DATA_URL}: HTTP ${response.status}`);
 
-  optionList(controls.specialty, fullData.metadata.specialties, "specialties");
-  optionList(controls.providerType, fullData.metadata.provider_types, "provider types");
-  applyFilters();
-
-  if (!hasFitToData && fullData.features.length) {
-    const bounds = new maplibregl.LngLatBounds();
-    fullData.features.forEach((feature) => bounds.extend(feature.geometry.coordinates));
-    map.fitBounds(bounds, { padding: 36, duration: 0, maxZoom: 12 });
-    hasFitToData = true;
-  }
+  const text = await response.text();
+  controls.status.textContent = `Downloaded tree data (${(text.length / 1024 / 1024).toFixed(1)} MB). Parsing...`;
+  fullData = JSON.parse(text);
+  controls.status.textContent = `Parsed ${fullData.features.length.toLocaleString()} trees. Waiting for map...`;
+  renderWhenReady();
 }
 
 map.on("load", async () => {
   addMapLayers();
   wireMapEvents();
-  wireControls();
+  mapReady = true;
+  renderWhenReady();
+});
 
-  try {
-    await loadData();
-  } catch (error) {
-    controls.status.textContent = "Map data did not load. Run python scripts/build_netlify_map_data.py and deploy the local site/ folder with assets/trees_map.geojson.";
-    console.error(error);
-  }
+loadData().catch((error) => {
+  controls.status.textContent = `Map data did not load: ${error.message}. Confirm assets/trees_map.geojson is included in the deployed site.`;
+  console.error(error);
 });

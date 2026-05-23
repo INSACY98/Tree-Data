@@ -106,3 +106,5 @@ No-CLI deploy option:
 3. Or unzip `deploy/primary-tree-care-netlify.zip` and drag the unzipped folder into Netlify Drop.
 
 The `deploy/` folder is local-only because it contains the generated tree data.
+
+If the deployed page stays on `Loading map data...`, the browser is probably still serving an older deploy or `app.js` did not load. The current app should change the status through `App loaded`, `Fetching tree data`, `Downloaded tree data`, and then the final mapped tree count. If it says `Map data did not load`, check that `assets/trees_map.geojson` is inside the folder you deployed.
