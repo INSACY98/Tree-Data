@@ -1,0 +1,8 @@
+[build]
+  publish = "site"
+
+[[headers]]
+  for = "/assets/trees_map.geojson"
+  [headers.values]
+    Cache-Control = "public, max-age=300"
+    Content-Type = "application/geo+json; charset=utf-8"

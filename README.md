@@ -6,6 +6,8 @@ Creative data transformation project that reimagines living NYC street trees as 
 
 - `scripts/primary_tree_care_transform.py` - reproducible pandas transformation script.
 - `scripts/build_primary_tree_care_map.py` - local interactive Leaflet map builder.
+- `scripts/build_netlify_map_data.py` - exports a lean tree-level GeoJSON for the hosted quality map.
+- `site/` - Netlify-ready static map app.
 - `docs/primary_tree_care_feature_codebook.md` - current data description, specialty mapping rules, species-to-specialty table, and validation summaries.
 - `requirements.txt` - Python dependencies used for the analysis workflow.
 
@@ -66,3 +68,33 @@ http://localhost:8000/docs/primary_tree_care_map.html
 ```
 
 The generated HTML map is local-only because it embeds the provider data.
+
+## Tree-Level Hosted Map
+
+Build the tree-level map data:
+
+```bash
+source .venv/bin/activate
+python scripts/build_netlify_map_data.py
+```
+
+Preview the Netlify site locally:
+
+```bash
+python3 -m http.server 8010 --directory site
+```
+
+Then open:
+
+```text
+http://localhost:8010/
+```
+
+Deploy to Netlify from the local generated site:
+
+```bash
+netlify login
+netlify deploy --dir site --prod
+```
+
+The generated `site/assets/trees_map.geojson` file is intentionally ignored by Git. A manual Netlify deploy uploads it to the hosted site without committing the data to GitHub.

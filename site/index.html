@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Primary Tree Care Quality Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Map controls">
+      <header>
+        <h1>Primary Tree Care</h1>
+        <p>Tree-level quality map for checking every provider record smoothly.</p>
+      </header>
+
+      <section class="metrics" aria-label="Dataset summary">
+        <div><strong id="metricMatches">0</strong><span>matching trees</span></div>
+        <div><strong id="metricRating">0.0</strong><span>avg rating</span></div>
+        <div><strong id="metricReview">0</strong><span>needs review</span></div>
+        <div><strong id="metricStars">0</strong><span>star doctors</span></div>
+      </section>
+
+      <label for="search">Search</label>
+      <input id="search" type="search" placeholder="tree id, ginkgo, Astoria" autocomplete="off" />
+
+      <label for="specialty">Specialty</label>
+      <select id="specialty"></select>
+
+      <label for="providerType">Provider Type</label>
+      <select id="providerType"></select>
+
+      <label for="quality">Quality Bucket</label>
+      <select id="quality"></select>
+
+      <label for="colorBy">Color Points By</label>
+      <select id="colorBy">
+        <option value="quality_bucket">Quality bucket</option>
+        <option value="medical_specialty">Specialty</option>
+        <option value="care_rating">Rating</option>
+        <option value="problem_burden_level">Problem burden</option>
+      </select>
+
+      <label for="rating">Minimum Rating: <span id="ratingValue">1.5</span></label>
+      <input id="rating" type="range" min="1.5" max="5" value="1.5" step="0.1" />
+
+      <div class="checks">
+        <label><input id="starOnly" type="checkbox" /> Star doctors only</label>
+        <label><input id="problemOnly" type="checkbox" /> Has tree problems</label>
+        <label><input id="weekendOnly" type="checkbox" /> Weekend availability</label>
+      </div>
+
+      <button id="reset" type="button">Reset Filters</button>
+      <p id="status" class="status">Loading map data...</p>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map" aria-label="Interactive tree provider map"></div>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
