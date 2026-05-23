@@ -25,6 +25,7 @@ const metrics = {
 let fullData = null;
 let currentData = null;
 let updateTimer = null;
+let hasFitToData = false;
 
 const map = new maplibregl.Map({
   container: "map",
@@ -56,6 +57,14 @@ const map = new maplibregl.Map({
 });
 
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+
+map.on("error", (event) => {
+  const message = event?.error?.message || "Unknown map error";
+  if (!fullData) {
+    controls.status.textContent = `Map error: ${message}`;
+  }
+  console.error(event.error || event);
+});
 
 function emptyCollection() {
   return { type: "FeatureCollection", features: [] };
@@ -231,8 +240,8 @@ function popupHtml(properties) {
 }
 
 function updatePointColors() {
-  if (!map.getLayer("unclustered-trees")) return;
-  map.setPaintProperty("unclustered-trees", "circle-color", colorExpression());
+  if (!map.getLayer("tree-points")) return;
+  map.setPaintProperty("tree-points", "circle-color", colorExpression());
 }
 
 function applyFilters() {
@@ -243,7 +252,7 @@ function applyFilters() {
   map.getSource("trees").setData(currentData);
   summarize(features);
   updatePointColors();
-  controls.status.textContent = `${features.length.toLocaleString()} of ${fullData.features.length.toLocaleString()} mapped trees shown. Click clusters to zoom, click points to inspect records.`;
+  controls.status.textContent = `${features.length.toLocaleString()} of ${fullData.features.length.toLocaleString()} mapped trees shown. Click any point to inspect its record.`;
 }
 
 function scheduleFilter() {
@@ -255,73 +264,23 @@ function addMapLayers() {
   map.addSource("trees", {
     type: "geojson",
     data: emptyCollection(),
-    cluster: true,
-    clusterMaxZoom: 15,
-    clusterRadius: 48,
   });
 
   map.addLayer({
-    id: "clusters",
+    id: "tree-points",
     type: "circle",
     source: "trees",
-    filter: ["has", "point_count"],
-    paint: {
-      "circle-color": [
-        "step",
-        ["get", "point_count"],
-        "#8db5a4",
-        50, "#5b9b78",
-        150, "#2f7d4f",
-        500, "#14532d",
-      ],
-      "circle-radius": [
-        "step",
-        ["get", "point_count"],
-        18,
-        50, 23,
-        150, 29,
-        500, 36,
-      ],
-      "circle-stroke-color": "#ffffff",
-      "circle-stroke-width": 2,
-      "circle-opacity": 0.88,
-    },
-  });
-
-  map.addLayer({
-    id: "cluster-count",
-    type: "symbol",
-    source: "trees",
-    filter: ["has", "point_count"],
-    layout: {
-      "text-field": ["get", "point_count_abbreviated"],
-      "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-      "text-size": 12,
-    },
-    paint: {
-      "text-color": "#ffffff",
-    },
-  });
-
-  map.addLayer({
-    id: "unclustered-trees",
-    type: "circle",
-    source: "trees",
-    filter: ["!", ["has", "point_count"]],
     paint: {
       "circle-color": colorExpression(),
       "circle-radius": [
-        "case",
-        ["==", ["get", "star_doctor"], true],
-        6.8,
-        4.8,
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        9, 2.2,
+        13, 4.8,
+        17, 7.5,
       ],
-      "circle-stroke-color": [
-        "case",
-        ["==", ["get", "star_doctor"], true],
-        "#111827",
-        "#ffffff",
-      ],
+      "circle-stroke-color": "#ffffff",
       "circle-stroke-width": [
         "case",
         ["==", ["get", "star_doctor"], true],
@@ -334,18 +293,7 @@ function addMapLayers() {
 }
 
 function wireMapEvents() {
-  map.on("click", "clusters", async (event) => {
-    const features = map.queryRenderedFeatures(event.point, { layers: ["clusters"] });
-    const clusterId = features[0].properties.cluster_id;
-    try {
-      const zoom = await map.getSource("trees").getClusterExpansionZoom(clusterId);
-      map.easeTo({ center: features[0].geometry.coordinates, zoom });
-    } catch (error) {
-      console.error(error);
-    }
-  });
-
-  map.on("click", "unclustered-trees", (event) => {
+  map.on("click", "tree-points", (event) => {
     const feature = event.features[0];
     new maplibregl.Popup({ maxWidth: "380px" })
       .setLngLat(feature.geometry.coordinates)
@@ -353,13 +301,11 @@ function wireMapEvents() {
       .addTo(map);
   });
 
-  ["clusters", "unclustered-trees"].forEach((layerId) => {
-    map.on("mouseenter", layerId, () => {
-      map.getCanvas().style.cursor = "pointer";
-    });
-    map.on("mouseleave", layerId, () => {
-      map.getCanvas().style.cursor = "";
-    });
+  map.on("mouseenter", "tree-points", () => {
+    map.getCanvas().style.cursor = "pointer";
+  });
+  map.on("mouseleave", "tree-points", () => {
+    map.getCanvas().style.cursor = "";
   });
 }
 
@@ -389,12 +335,20 @@ function wireControls() {
 async function loadData() {
   const response = await fetch(DATA_URL);
   if (!response.ok) throw new Error(`Could not load ${DATA_URL}`);
+  controls.status.textContent = "Loaded data file. Drawing tree points...";
   fullData = await response.json();
 
   optionList(controls.specialty, fullData.metadata.specialties, "specialties");
   optionList(controls.providerType, fullData.metadata.provider_types, "provider types");
   optionList(controls.quality, qualityOrder(uniqueProperty(fullData.features, "quality_bucket")), "quality buckets");
   applyFilters();
+
+  if (!hasFitToData && fullData.features.length) {
+    const bounds = new maplibregl.LngLatBounds();
+    fullData.features.forEach((feature) => bounds.extend(feature.geometry.coordinates));
+    map.fitBounds(bounds, { padding: 36, duration: 0, maxZoom: 12 });
+    hasFitToData = true;
+  }
 }
 
 map.on("load", async () => {
@@ -405,7 +359,7 @@ map.on("load", async () => {
   try {
     await loadData();
   } catch (error) {
-    controls.status.textContent = "Map data did not load. Run python scripts/build_netlify_map_data.py, then refresh.";
+    controls.status.textContent = "Map data did not load. Run python scripts/build_netlify_map_data.py and deploy the local site/ folder with assets/trees_map.geojson.";
     console.error(error);
   }
 });
