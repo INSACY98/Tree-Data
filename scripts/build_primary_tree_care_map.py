@@ -8,7 +8,7 @@ import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_INPUT = PROJECT_ROOT / "data" / "processed" / "primary_tree_care_providers.csv"
+DEFAULT_INPUT = PROJECT_ROOT / "data" / "processed" / "primary_tree_care_providers2.csv"
 DEFAULT_OUTPUT = PROJECT_ROOT / "docs" / "primary_tree_care_map.html"
 
 
@@ -352,20 +352,35 @@ def render_html(rows: list[dict[str, object]]) -> str:
     const specialties = {specialties_json};
     const providerTypes = {provider_types_json};
     const specialtyColors = {{
-      "Allergy/Immunology": "#d97706",
+      "Allergy and Immunology": "#d97706",
       "Cardiology": "#dc2626",
       "Dermatology": "#f97316",
+      "Emergency Medicine": "#b91c1c",
       "Endocrinology": "#9333ea",
+      "ENT / Otolaryngology": "#0f766e",
       "Family Medicine": "#16a34a",
       "Gastroenterology": "#a16207",
       "Geriatrics": "#64748b",
+      "Hematology": "#be123c",
+      "Infectious Disease": "#ca8a04",
       "Internal Medicine": "#2563eb",
+      "Nephrology": "#0284c7",
       "Neurology": "#7c3aed",
+      "Nutrition and Weight Management": "#84cc16",
+      "Occupational Medicine": "#475569",
+      "Oncology": "#6d28d9",
+      "Ophthalmology": "#0891b2",
+      "Orthopedics": "#92400e",
+      "Pain Management": "#c2410c",
       "Pediatrics": "#db2777",
       "Preventive Medicine": "#059669",
       "Psychiatry": "#0891b2",
       "Pulmonology": "#0d9488",
+      "Rheumatology": "#a855f7",
+      "Sleep Medicine": "#4f46e5",
       "Sports Medicine": "#65a30d",
+      "Urology": "#0369a1",
+      "Vascular Medicine": "#991b1b",
       "Women's Health": "#e11d48"
     }};
 
