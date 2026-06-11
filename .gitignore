@@ -7,5 +7,6 @@ notebooks/
 docs/*.html
 site/assets/trees_map.geojson
 site_v2/assets/trees_map.json
+site_v2/assets/trees_map_all_fields.json
 deploy/
 *.pyc
