@@ -10,7 +10,7 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = PROJECT_ROOT / "data" / "processed" / "primary_tree_care_providers2.csv"
-DEFAULT_OUTPUT = PROJECT_ROOT / "site_v2" / "assets" / "trees_map_all_fields.json"
+DEFAULT_OUTPUT = PROJECT_ROOT / "site_all_fields" / "assets" / "trees_map_all_fields.json"
 
 INTEGER_COLUMNS = {
     "provider_id",
